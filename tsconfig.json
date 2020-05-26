@@ -1,0 +1,18 @@
+{
+  "include": ["src/**/*"],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "outDir": "build/",
+    "target": "ES2017",
+    "module": "ESNext",
+    "lib": ["ES6", "DOM"],
+    "moduleResolution": "node",
+    "sourceMap": true,
+    "declaration": false,
+    "resolveJsonModule": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "esModuleInterop": true
+  }
+}
