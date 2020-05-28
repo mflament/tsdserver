@@ -2,11 +2,6 @@ export type FileNameResolver = (name: string) => string[] | string;
 
 export type ModuleResolver = (name: string) => string;
 
-/**
- * AliasOptions<T>
- */
-export type AliasOptions<T> = { [key: string]: T } | Alias<T>[];
-
 export type AliasKey = string | RegExp;
 
 /**
@@ -24,12 +19,16 @@ export interface Alias<T> {
 }
 
 /**
+ * AliasOptions<T>
+ */
+export type AliasOptions<T> = { [key: string]: T } | Alias<T>[];
+
+/**
  * Default module resolver options.
  */
 export interface DefaultModuleResolverOptions {
   /**
-   * An object with module names as keys, mapped to module path.
-   * Or a list of Alias object
+   * Used to map import path to module name.
    */
   alias: AliasOptions<string>;
 }
