@@ -3,7 +3,7 @@
 TypeScript developement server.
 
 A simple HTTP server (using [micro](https://github.com/zeit/micro)) to serve your TypeScript web site static resources
-and update javascritp imports.
+and update javascript imports.
 
 ## Features:
 
@@ -17,7 +17,7 @@ and update javascritp imports.
 
 ## Requirements
 
-This plugin requires an LTS Node version (v10.0.0+).
+This plugin requires a LTS Node version (v10.0.0+).
 
 ## Install
 
@@ -35,7 +35,7 @@ From the command line, in the project directory:
 npx tsdserver -l tcp://127.0.0.1:8080
 ```
 
-Will start a server with default configuration listeneing to port 8080 of local interface.
+Will start a server with default configuration listening on port 8080 of local interface.
 
 Use `npx tsdserver --help` to get more details on command line options.
 
@@ -70,7 +70,7 @@ resolution functions, you will need to use a CommonJS module.
    */
   sourceType?: 'script' | 'module';
   /**
-   * ecmaVersion of js. Used by of acorn parser
+   * ecmaVersion of js. Used by acorn parser
    */
   ecmaVersion?: 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 2015 | 2016 | 2017 | 2018 | 2019 | 2020;
   /**
@@ -107,8 +107,8 @@ This can also be an alias map configuration.
 
 Used to resolve module path from module name.  
 Can be a function `(name: string) => string` that convert a module name to a path. This path will then be requested by
-follwing request on this import and will use the root directories to find the js file as any other resources.
+following request on this import and will use the root directories to find the js file as any other resources.
 
 It can also be a configuration object for the default module resolver. Right now, there is a single option for this
-resolver, the 'alias' (inspired from
+resolver, the 'alias' (inspired by
 [rollup-plugin-alias](https://github.com/rollup/plugins/tree/master/packages/alias#readme)).
