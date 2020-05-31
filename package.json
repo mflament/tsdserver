@@ -1,6 +1,6 @@
 {
   "name": "tsdserver",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Yah",
   "license": "Apache-2.0",
   "description": "HTTP server used for TypeScript browser dev",
@@ -31,6 +31,7 @@
   ],
   "dependencies": {
     "acorn": "^7.2.0",
+    "acorn-dynamic-import": "^4.0.0",
     "acorn-walk": "^7.1.1",
     "micro": "~9.3.4",
     "mime-types": "^2.1.27"
