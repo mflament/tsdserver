@@ -12,7 +12,7 @@ var acorn = _interopDefault(require('acorn'));
 var walk = _interopDefault(require('acorn-walk'));
 var util = require('util');
 
-var version = "1.0.0";
+var version = "2.0.0";
 
 function fileExists(path) {
     const stats = fileStats(path);
@@ -28,12 +28,6 @@ function fileStats(path) {
         return null;
     }
 }
-function isStringArray(obj) {
-    if (util.isArray(obj)) {
-        return obj.every(e => util.isString(e));
-    }
-    return false;
-}
 function replaceMatches(s, matches) {
     let res = s;
     for (let index = 0; index < matches.length; index++) {
@@ -42,71 +36,72 @@ function replaceMatches(s, matches) {
     return res;
 }
 
-class AliasResolver {
-    constructor(param, replacer) {
-        this.aliases = [];
-        this.replacer = replacer;
-        let aliases;
-        if (util.isArray(param)) {
-            aliases = param;
-        }
-        else {
-            aliases = [];
-            for (const key in param) {
-                aliases.push({
-                    find: key,
-                    replacement: param[key]
-                });
-            }
-        }
-        this.aliases = aliases;
+function isAlias(obj) {
+    if (obj !== null && typeof obj === 'object') {
+        const alias = obj;
+        const findType = typeof alias.find;
+        const replaceType = typeof alias.replace;
+        return ((findType === 'string' || findType === 'function' || util.types.isRegExp(alias.find)) &&
+            (replaceType === 'string' || replaceType === 'function'));
     }
-    resolve(name) {
-        for (const alias of this.aliases) {
-            if (alias.find === name) {
-                return alias.replacement;
+    return false;
+}
+function isAliasArray(obj) {
+    return Array.isArray(obj) && obj.every(o => isAlias(o));
+}
+function newAliasResolver(param) {
+    const aliases = [];
+    if (isAliasArray(param)) {
+        aliases.push(...param);
+    }
+    else if (param != null && typeof param === 'object') {
+        for (const key in param) {
+            const alias = {
+                find: key,
+                replacement: param[key]
+            };
+            if (isAlias(alias)) {
+                aliases.push(alias);
             }
-            if (alias.find instanceof RegExp) {
+        }
+    }
+    return name => {
+        for (const alias of aliases) {
+            if (alias.find === name) {
+                if (typeof alias.replace === 'function')
+                    return alias.replace(name);
+                return alias.replace;
+            }
+            if (util.types.isRegExp(alias.find)) {
                 const matches = name.match(alias.find);
                 if (matches) {
-                    return this.replacer(alias.replacement, matches);
+                    if (typeof alias.replace === 'function')
+                        return alias.replace(...matches);
+                    return replaceMatches(alias.replace, matches);
                 }
+                return undefined;
+            }
+            if (typeof alias.find === 'function') {
+                let results = alias.find(name);
+                if (results) {
+                    if (typeof results === 'string')
+                        results = [results];
+                    else if (results === true)
+                        results = [name];
+                    if (typeof alias.replace === 'function')
+                        return alias.replace(...results);
+                    return replaceMatches(alias.replace, results);
+                }
+                return undefined;
             }
         }
-        return undefined;
-    }
-}
-function isAliasOptions(obj, isElement) {
-    if (util.isArray(obj))
-        return obj.every(a => isAlias(a, isElement));
-    if (util.isObject(obj))
-        return Object.keys(obj).every(k => util.isString(k)) && Object.values(obj).every(v => isElement(v));
-    return false;
-}
-function isAlias(obj, isElement) {
-    if (util.isObject(obj)) {
-        const alias = obj;
-        if (util.isString(alias.find) || util.isRegExp(alias.find))
-            return false;
-        return isElement(alias.replacement);
-    }
-    return false;
+    };
 }
 
-function isDefaultModuleResolverOptions(obj) {
-    if (util.isObject(obj) && obj.alias) {
-        const alias = obj.alias;
-        return isAliasOptions(alias, (e) => util.isString(e));
-    }
-    return false;
-}
-function defaultResolver(options) {
-    if (!options || !options.alias || options.alias.length == 0) {
-        return name => name;
-    }
-    const aliaser = new AliasResolver(options.alias, replaceMatches);
+function defaultResolver(aliasMap) {
+    const resolver = newAliasResolver(aliasMap);
     return name => {
-        name = aliaser.resolve(name) || name;
+        name = (resolver && resolver(name)) || name;
         const packageFile = path.join('node_modules', name, 'package.json');
         if (fileExists(packageFile)) {
             const npmPackage = JSON.parse(fs.readFileSync(packageFile, { encoding: 'utf-8' }));
@@ -122,24 +117,30 @@ function defaultResolver(options) {
 }
 
 function isModuleResolver(obj) {
-    return util.isFunction(obj);
+    return typeof obj === 'function';
 }
-class JSImportUpdater {
-    constructor(options) {
-        options = options || {};
-        this.sourceType = options.sourceType || 'module';
-        this.ecmaVersion = options.ecmaVersion || 2020;
-        if (isModuleResolver(options.resolveModule)) {
-            this.moduleResolver = options.resolveModule;
-        }
-        else {
-            this.moduleResolver = defaultResolver(options.resolveModule);
-        }
+function isImportNode(node) {
+    return node !== undefined && node.source !== undefined;
+}
+function isRelativeModule(name) {
+    return name.startsWith('/') || name.startsWith('./') || name.startsWith('../');
+}
+const newTransformer = (options) => {
+    if (options === undefined || typeof options === 'boolean')
+        options = {};
+    const sourceType = options.sourceType || 'module';
+    const ecmaVersion = options.ecmaVersion || 2020;
+    let moduleResolver;
+    if (isModuleResolver(options.moduleResolver)) {
+        moduleResolver = options.moduleResolver;
     }
-    update(code) {
+    else {
+        moduleResolver = defaultResolver(options.moduleResolver);
+    }
+    const updateImports = (code) => {
         const parsed = acorn.parse(code, {
-            sourceType: this.sourceType,
-            ecmaVersion: this.ecmaVersion,
+            sourceType: sourceType,
+            ecmaVersion: ecmaVersion,
             ranges: true
         });
         let newCode = '';
@@ -153,7 +154,7 @@ class JSImportUpdater {
             if (!name)
                 return;
             if (!isRelativeModule(name)) {
-                name = this.moduleResolver(name);
+                name = moduleResolver(name);
             }
             if (!name.endsWith('.js'))
                 name += '.js';
@@ -171,21 +172,61 @@ class JSImportUpdater {
             newCode += code.substring(offset, code.length);
         }
         return newCode;
-    }
-}
-function isImportNode(node) {
-    return node !== undefined && node.source !== undefined;
-}
-function isRelativeModule(name) {
-    return name.startsWith('/') || name.startsWith('./') || name.startsWith('../');
-}
+    };
+    return async (file) => {
+        if (file.resolvedFile.endsWith('.js')) {
+            const code = await file.readText();
+            return updateImports(code);
+        }
+        return undefined;
+    };
+};
 
-class ResolvedFile {
-    constructor(requestPath, file, stats) {
-        this.requestPath = requestPath;
-        this.file = file;
+var JSResourceWrapper = () => {
+    return async (file) => {
+        if (file.requestedPath.endsWith('.js') && !file.resolvedFile.endsWith('.js')) {
+            const code = await file.readText();
+            return 'export default `' + code + '`;\n';
+        }
+        return undefined;
+    };
+};
+
+const JS_MIME_TYPE = 'application/javascript';
+class DefaultResolvedFile {
+    /**
+     *
+     * @param requestedPath requested path
+     * @param resolvedFile resolved resource name
+     * @param stats
+     */
+    constructor(requestedPath, resolvedPath, resolvedFile, stats) {
+        this.requestedPath = requestedPath;
+        this.resolvedPath = resolvedPath;
+        this.resolvedFile = resolvedFile;
         this.stats = stats;
-        this.mimeType = mime.lookup(path.extname(this.requestPath)) || undefined;
+        this.content = null;
+    }
+    get requestedMimeType() {
+        return mime.lookup(path.extname(this.requestedPath)) || undefined;
+    }
+    get resolvedMimeType() {
+        return mime.lookup(path.extname(this.resolvedFile)) || undefined;
+    }
+    async readText() {
+        if (this.content !== null) {
+            return Promise.resolve(this.content);
+        }
+        return new Promise((resolve, reject) => {
+            fs.readFile(this.resolvedFile, { encoding: 'utf-8' }, (err, data) => {
+                if (err)
+                    reject(err);
+                else {
+                    this.content = data;
+                    resolve(data);
+                }
+            });
+        });
     }
     isUpToDate(message) {
         const fileDate = this.stats.mtime;
@@ -207,40 +248,31 @@ class ResolvedFile {
         }
         return false;
     }
-    async write(response, jsUpdater) {
+    async write(response) {
         const headers = {};
-        if (this.mimeType)
-            headers['Content-Type'] = this.mimeType;
+        if (this.requestedMimeType) {
+            headers['Content-Type'] = this.requestedMimeType;
+        }
         headers['Last-Modified'] = this.stats.mtime.toUTCString();
         headers['ETag'] = this.stats.mtime.getTime();
         headers['Cache-Control'] = 'no-cache, max-age=0';
         response.writeHead(200, headers);
-        if (this.requestedJS) {
-            let code = await this.readText(this.file);
-            if (!this.resolvedJS) {
-                code = this.wrapResource(code);
-            }
-            else {
-                code = jsUpdater.update(code);
-            }
-            return this.writeText(code, response);
+        if (this.content) {
+            return this.writeText(this.content, response);
         }
         else {
-            return this.stream(this.file, response);
+            return this.stream(response);
         }
     }
-    get requestedJS() {
-        return this.requestPath.endsWith('.js');
+    get isJSRequested() {
+        return this.requestedMimeType === JS_MIME_TYPE;
     }
-    get resolvedJS() {
-        return this.file.endsWith('.js');
+    get isJSResolved() {
+        return this.resolvedMimeType === JS_MIME_TYPE;
     }
-    wrapResource(code) {
-        return 'export default `' + code + '`;\r\n';
-    }
-    async stream(path, out) {
+    async stream(out) {
         return new Promise(resolve => {
-            const stream = fs.createReadStream(path);
+            const stream = fs.createReadStream(this.resolvedFile);
             stream.on('end', resolve);
             stream.on('error', resolve);
             stream.pipe(out, { end: false });
@@ -257,68 +289,52 @@ class ResolvedFile {
             });
         });
     }
-    async readText(path) {
-        return new Promise((resolve, reject) => {
-            fs.readFile(path, { encoding: 'utf-8' }, (err, data) => {
-                if (err)
-                    reject(err);
-                else
-                    resolve(data);
-            });
-        });
-    }
-}
-function isFileResolver(obj) {
-    return util.isFunction(obj);
-}
-function isFileAliasOptions(obj) {
-    return isAliasOptions(obj, (e) => util.isString(e) || isStringArray(e));
 }
 class FileResolver {
     constructor(options) {
-        this.options = options;
-        const option = this.options.mapFileName;
-        if (!option)
-            this.resolver = () => undefined;
-        else if (isFileResolver(option)) {
-            this.resolver = option;
+        this.directories = [];
+        if (options.wrapJSResources !== false) {
+            this.fallback = p => {
+                if (p.endsWith('.js'))
+                    return p.substring(0, p.length - 3);
+                if (options.fallback)
+                    return options.fallback(p);
+            };
         }
-        else if (isFileAliasOptions(option)) {
-            const aliaser = new AliasResolver(option, (value, matches) => {
-                if (util.isString(value))
-                    return replaceMatches(value, matches);
-                return value.map(v => replaceMatches(v, matches));
-            });
-            this.resolver = n => aliaser.resolve(n);
+        else if (options.fallback) {
+            if (typeof options.fallback === 'function') {
+                this.fallback = options.fallback;
+            }
+            else {
+                console.error("Invalid 'fallback' option, expected 'function'", options.fallback);
+                this.fallback = () => undefined;
+            }
         }
         else {
-            console.error('Invalid mapFileName options');
-            this.resolver = () => undefined;
+            this.fallback = () => undefined;
         }
+        if (options.directories) {
+            if (Array.isArray(options.directories)) {
+                this.directories.push(...options.directories);
+            }
+            else {
+                console.error("Invalid 'directories' option, expected 'array'", options.directories);
+            }
+        }
+        this.directories.push('.');
+        this.directories.push('node_modules');
     }
     resolve(requestPath) {
-        const resolved = this.resolver(requestPath);
-        let fileNames;
-        if (!resolved)
-            fileNames = [requestPath];
-        else if (util.isString(resolved))
-            fileNames = [resolved];
-        else
-            fileNames = resolved;
-        const directories = new Set();
-        if (this.options.directories) {
-            this.options.directories.map(d => path.resolve(d)).forEach(d => directories.add(d));
-        }
-        directories.add(path.resolve('.'));
-        directories.add(path.resolve('node_modules'));
-        for (const name of fileNames) {
-            for (const directory of directories) {
-                let file = path.resolve(directory, name);
+        let currentPath = requestPath;
+        while (currentPath) {
+            for (const directory of this.directories) {
+                let file = path.resolve(directory, currentPath);
                 const stats = fileStats(file);
                 if (stats != null) {
-                    return new ResolvedFile(requestPath, file, stats);
+                    return new DefaultResolvedFile(requestPath, currentPath, file, stats);
                 }
             }
+            currentPath = this.fallback(currentPath);
         }
     }
 }
@@ -331,40 +347,76 @@ function extractPath(requestUrl) {
     }
     return requestPath;
 }
-function createTSDRequestListener(options) {
+function createTransformers(options) {
+    const transformers = [];
+    if (options.transformers) {
+        if (!Array.isArray(options.transformers)) {
+            console.error("Invalid option 'transformers', expected 'array'", options.transformers);
+        }
+        else {
+            for (const transformer of options.transformers) {
+                if (typeof transformer === 'function') {
+                    transformers.push(transformer);
+                }
+                else {
+                    console.error("Invalid option 'transformer', expected 'function'", transformer);
+                }
+            }
+        }
+    }
+    return transformers;
+}
+function createRequestListener(options) {
+    options = options || {};
+    const welcome = options.welcome || 'index.html';
     const fileResolver = new FileResolver(options);
-    const jsUpdater = new JSImportUpdater(options);
-    return async (message, response) => {
-        if (message.method !== 'GET') {
-            response.writeHead(405, { Allow: 'GET' });
-            response.end();
-            return;
-        }
-        if (!message.url) {
-            response.writeHead(500, 'no url');
-            response.end();
-            return;
-        }
-        let requestPath = extractPath(message.url) || options.welcome || 'index.html';
-        const file = fileResolver.resolve(requestPath);
-        if (file) {
-            if (file.isUpToDate(message)) {
+    const transformers = createTransformers(options);
+    if (options.updateJSImport !== false) {
+        transformers.push(newTransformer(options.updateJSImport));
+    }
+    if (options.wrapJSResources !== false) {
+        transformers.push(JSResourceWrapper());
+    }
+    async function handle(message, response) {
+        if (!message.url)
+            throw new Error('no url in message');
+        let requestPath = extractPath(message.url) || welcome;
+        const resolvedFile = fileResolver.resolve(requestPath);
+        if (resolvedFile) {
+            if (resolvedFile.isUpToDate(message)) {
                 response.writeHead(304, {});
             }
             else {
-                try {
-                    await file.write(response, jsUpdater);
+                for (const transformer of transformers) {
+                    let newContent = await transformer(resolvedFile);
+                    if (newContent !== undefined) {
+                        resolvedFile.content = newContent;
+                    }
                 }
-                catch (e) {
-                    console.error('Error sending response for ' + requestPath, file, e);
-                }
+                await resolvedFile.write(response);
             }
         }
         else {
             console.info('Resource not found "' + requestPath + '"');
             response.writeHead(404, `${requestPath} not found`);
         }
-        response.end();
+    }
+    return async (message, response) => {
+        if (message.method !== 'GET') {
+            response.writeHead(405, { Allow: 'GET' });
+            response.end();
+            return;
+        }
+        try {
+            await handle(message, response);
+        }
+        catch (e) {
+            console.log('Error handling request', message, e);
+            response.writeHead(500, 'Server error: ' + e.get);
+        }
+        finally {
+            response.end();
+        }
     };
 }
 
@@ -434,45 +486,6 @@ function parseEndpoint(value, name) {
 function isAddressInfo(o) {
     return typeof o === 'object' && o.port !== undefined;
 }
-function isServerOptions(obj) {
-    if (!util.isObject(obj)) {
-        console.error('options is not an object', obj);
-        return false;
-    }
-    const options = obj;
-    if (options.directories) {
-        if (!util.isArray(options.directories)) {
-            console.error('options.directories is not an array', options.directories);
-            return false;
-        }
-        if (!options.directories.every(d => util.isString(d))) {
-            console.error('options.directories contains invalid type, expeccted only string', options.directories);
-            return false;
-        }
-    }
-    if (options.ecmaVersion && !util.isNumber(options.ecmaVersion)) {
-        // TODO : improve check by restricting to ecmaVersion values
-        console.error('options.ecmaVersion has an invalid value', options.ecmaVersion);
-        return false;
-    }
-    if (options.sourceType && options.sourceType !== 'module' && options.sourceType !== 'script') {
-        console.error('options.sourceType has an invalid value', options.sourceType);
-        return false;
-    }
-    if (options.mapFileName &&
-        !isAliasOptions(options.mapFileName, (e) => util.isString(e) || isStringArray(e)) &&
-        !util.isFunction(options.mapFileName)) {
-        console.error('options.mapFileName has an invalid type: ' + typeof options.mapFileName, options.mapFileName);
-        return false;
-    }
-    if (options.resolveModule !== undefined &&
-        !isDefaultModuleResolverOptions(options.resolveModule) &&
-        !util.isFunction(options.resolveModule)) {
-        console.error('options.resolveModule is invalid', options.resolveModule);
-        return false;
-    }
-    return true;
-}
 async function loadOptions(files) {
     for (let file of files) {
         if (!path.isAbsolute(file))
@@ -485,13 +498,12 @@ async function loadOptions(files) {
             catch (e) {
                 console.error('Error loading options file ' + file, e);
             }
-            if (isServerOptions(obj)) {
+            if (obj !== null && typeof obj === 'object') {
                 console.info('Using options file ' + file);
                 return obj;
             }
         }
     }
-    return null;
 }
 async function parseCommandLine() {
     // Check if the user defined any options
@@ -527,12 +539,6 @@ async function parseCommandLine() {
         optionsFiles.push(args._[0]);
     optionsFiles.push('tsdserver.config.js', 'tsdserver.json');
     let options = await loadOptions(optionsFiles);
-    if (!options) {
-        options = {
-            ecmaVersion: 2015,
-            sourceType: 'module'
-        };
-    }
     return {
         endpoints: endpoints,
         options: options
@@ -575,7 +581,7 @@ function startEndpoint(module, endpoint) {
 async function start() {
     try {
         const commandLine = await parseCommandLine();
-        const listener = createTSDRequestListener(commandLine.options);
+        const listener = createRequestListener(commandLine.options);
         for (const endpoint of commandLine.endpoints) {
             startEndpoint(listener, endpoint);
         }

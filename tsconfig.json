@@ -8,7 +8,7 @@
     "lib": ["ES6", "DOM"],
     "moduleResolution": "node",
     "sourceMap": true,
-    "declaration": false,
+    "declaration": true,
     "resolveJsonModule": true,
     "strict": true,
     "noImplicitAny": true,

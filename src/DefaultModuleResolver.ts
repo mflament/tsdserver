@@ -1,31 +1,15 @@
 import path from 'path';
 import fs from 'fs';
 
-import { DefaultModuleResolverOptions, ModuleResolver, Alias } from './tsdserver';
-import { fileExists, replaceMatches } from './Utils';
-import { AliasResolver, isAlias, isAliasOptions } from './Alias';
-import { isObject, isString } from 'util';
+import { fileExists } from './Utils';
+import { AliasMap, newAliasResolver } from './AliasMap';
 
-export function isModuleAlias(obj: any): obj is Alias<string> {
-  return isAlias(obj, (e): e is string => isString(e));
-}
+export type ModuleResolver = (name: string) => string;
 
-export function isDefaultModuleResolverOptions(obj: any): obj is DefaultModuleResolverOptions {
-  if (isObject(obj) && obj.alias) {
-    const alias = (obj as DefaultModuleResolverOptions).alias;
-    return isAliasOptions(alias, (e): e is string => isString(e));
-  }
-  return false;
-}
-
-export function defaultResolver(options?: DefaultModuleResolverOptions): ModuleResolver {
-  if (!options || !options.alias || options.alias.length == 0) {
-    return name => name;
-  }
-
-  const aliaser = new AliasResolver<string>(options.alias, replaceMatches);
+export function defaultResolver(aliasMap?: AliasMap): ModuleResolver {
+  const resolver = newAliasResolver(aliasMap);
   return name => {
-    name = aliaser.resolve(name) || name;
+    name = (resolver && resolver(name)) || name;
     const packageFile = path.join('node_modules', name, 'package.json');
     if (fileExists(packageFile)) {
       const npmPackage = JSON.parse(fs.readFileSync(packageFile, { encoding: 'utf-8' }));
