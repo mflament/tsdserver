@@ -8,6 +8,7 @@ import { fileStats } from './Utils';
 import { Options } from './Options';
 import { ResourceTransformer } from './ResourceTransformer';
 import JSResourceWrapper from './JSResourceWrapper';
+import { config } from 'process';
 
 const JS_MIME_TYPE = 'application/javascript';
 
@@ -112,8 +113,12 @@ class DefaultResolvedFile implements ResolvedFile {
   private async stream(out: ServerResponse): Promise<void> {
     return new Promise(resolve => {
       const stream = fs.createReadStream(this.resolvedFile);
-      stream.on('end', resolve);
-      stream.on('error', resolve);
+      function done() {
+        stream.close();
+        resolve();
+      }
+      stream.on('end', done);
+      stream.on('error', done);
       stream.pipe(out, { end: false });
     });
   }
@@ -222,6 +227,7 @@ export function createRequestListener(options?: Options): RequestListener {
     let requestPath = extractPath(message.url) || welcome;
     const resolvedFile = fileResolver.resolve(requestPath);
     if (resolvedFile) {
+      if (options?.debug) console.log('handling request: ' + requestPath);
       if (resolvedFile.isUpToDate(message)) {
         response.writeHead(304, {});
       } else {
@@ -249,7 +255,7 @@ export function createRequestListener(options?: Options): RequestListener {
     try {
       await handle(message, response);
     } catch (e) {
-      console.log('Error handling request', message, e);
+      console.log('Error handling request: ' + message.url, e);
       response.writeHead(500, 'Server error: ' + e.get);
     } finally {
       response.end();

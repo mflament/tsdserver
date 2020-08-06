@@ -40,9 +40,9 @@ function isAlias(obj) {
     if (obj !== null && typeof obj === 'object') {
         const alias = obj;
         const findType = typeof alias.find;
-        const replaceType = typeof alias.replace;
+        const replaceType = alias.replace ? typeof alias.replace : null;
         return ((findType === 'string' || findType === 'function' || util.types.isRegExp(alias.find)) &&
-            (replaceType === 'string' || replaceType === 'function'));
+            (replaceType === null || replaceType === 'string' || replaceType === 'function'));
     }
     return false;
 }
@@ -58,7 +58,7 @@ function newAliasResolver(param) {
         for (const key in param) {
             const alias = {
                 find: key,
-                replacement: param[key]
+                replace: param[key]
             };
             if (isAlias(alias)) {
                 aliases.push(alias);
@@ -75,6 +75,8 @@ function newAliasResolver(param) {
             if (util.types.isRegExp(alias.find)) {
                 const matches = name.match(alias.find);
                 if (matches) {
+                    if (alias.replace == null)
+                        return null;
                     if (typeof alias.replace === 'function')
                         return alias.replace(...matches);
                     return replaceMatches(alias.replace, matches);
@@ -84,10 +86,14 @@ function newAliasResolver(param) {
             if (typeof alias.find === 'function') {
                 let results = alias.find(name);
                 if (results) {
+                    if (results == null)
+                        return null;
                     if (typeof results === 'string')
                         results = [results];
                     else if (results === true)
                         results = [name];
+                    if (alias.replace === null)
+                        return null;
                     if (typeof alias.replace === 'function')
                         return alias.replace(...results);
                     return replaceMatches(alias.replace, results);
@@ -101,7 +107,13 @@ function newAliasResolver(param) {
 function defaultResolver(aliasMap) {
     const resolver = newAliasResolver(aliasMap);
     return name => {
-        name = (resolver && resolver(name)) || name;
+        if (resolver) {
+            const resolvedPath = resolver(name);
+            if (resolvedPath === null)
+                return null;
+            if (resolvedPath)
+                name = resolvedPath;
+        }
         const packageFile = path.join('node_modules', name, 'package.json');
         if (fileExists(packageFile)) {
             const npmPackage = JSON.parse(fs.readFileSync(packageFile, { encoding: 'utf-8' }));
@@ -119,11 +131,21 @@ function defaultResolver(aliasMap) {
 function isModuleResolver(obj) {
     return typeof obj === 'function';
 }
-function isImportNode(node) {
-    return node !== undefined && node.source !== undefined;
-}
 function isRelativeModule(name) {
     return name.startsWith('/') || name.startsWith('./') || name.startsWith('../');
+}
+function isImportDeclaration(node) {
+    return node.type === 'ImportDeclaration' || node.type === 'ImportExpression';
+}
+function isExportDeclaration(node) {
+    return node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration';
+}
+function getSource(node) {
+    if (isImportDeclaration(node))
+        return node.source;
+    if (isExportDeclaration(node))
+        return node.source;
+    return null;
 }
 const newTransformer = (options) => {
     if (options === undefined || typeof options === 'boolean')
@@ -137,7 +159,7 @@ const newTransformer = (options) => {
     else {
         moduleResolver = defaultResolver(options.moduleResolver);
     }
-    const updateImports = (code) => {
+    const updateSource = (code) => {
         const parsed = acorn.parse(code, {
             sourceType: sourceType,
             ecmaVersion: ecmaVersion,
@@ -146,27 +168,45 @@ const newTransformer = (options) => {
         let newCode = '';
         let offset = 0;
         const visitor = (node) => {
-            if (!isImportNode(node))
-                throw new Error('Not an import node');
-            if (!node.source.range)
-                throw new Error('No range');
-            let name = node.source.value;
+            const source = getSource(node);
+            if (!source)
+                return;
+            if (!source.range) {
+                console.error('No; range in AST node');
+                return;
+            }
+            let name = source.value;
             if (!name)
                 return;
             if (!isRelativeModule(name)) {
-                name = moduleResolver(name);
+                let resolved = moduleResolver(name);
+                if (resolved === null) {
+                    if (node.range) {
+                        newCode += code.substring(offset, node.range[0]);
+                        offset = node.range[1];
+                        return;
+                    }
+                    else
+                        console.error('No range for node', node);
+                }
+                else {
+                    //if (!resolved.startsWith('./')) resolved = './' + resolved;
+                    name = resolved;
+                }
             }
             if (!name.endsWith('.js'))
                 name += '.js';
-            if (name !== node.source.value) {
-                newCode += code.substring(offset, node.source.range[0]);
+            if (name !== source.value) {
+                newCode += code.substring(offset, source.range[0]);
                 newCode += '"' + name + '"';
-                offset = node.source.range[1];
+                offset = source.range[1];
             }
         };
         walk.simple(parsed, {
             ImportDeclaration: visitor,
-            ImportExpression: visitor
+            ImportExpression: visitor,
+            ExportNamedDeclaration: visitor,
+            ExportAllDeclaration: visitor
         });
         if (offset < code.length) {
             newCode += code.substring(offset, code.length);
@@ -176,7 +216,13 @@ const newTransformer = (options) => {
     return async (file) => {
         if (file.resolvedFile.endsWith('.js')) {
             const code = await file.readText();
-            return updateImports(code);
+            try {
+                return updateSource(code);
+            }
+            catch (e) {
+                console.error('Error parsing ' + file.resolvedFile, e);
+                return code;
+            }
         }
         return undefined;
     };
@@ -273,8 +319,12 @@ class DefaultResolvedFile {
     async stream(out) {
         return new Promise(resolve => {
             const stream = fs.createReadStream(this.resolvedFile);
-            stream.on('end', resolve);
-            stream.on('error', resolve);
+            function done() {
+                stream.close();
+                resolve();
+            }
+            stream.on('end', done);
+            stream.on('error', done);
             stream.pipe(out, { end: false });
         });
     }
@@ -378,11 +428,14 @@ function createRequestListener(options) {
         transformers.push(JSResourceWrapper());
     }
     async function handle(message, response) {
+        var _a;
         if (!message.url)
             throw new Error('no url in message');
         let requestPath = extractPath(message.url) || welcome;
         const resolvedFile = fileResolver.resolve(requestPath);
         if (resolvedFile) {
+            if ((_a = options) === null || _a === void 0 ? void 0 : _a.debug)
+                console.log('handling request: ' + requestPath);
             if (resolvedFile.isUpToDate(message)) {
                 response.writeHead(304, {});
             }
@@ -411,7 +464,7 @@ function createRequestListener(options) {
             await handle(message, response);
         }
         catch (e) {
-            console.log('Error handling request', message, e);
+            console.log('Error handling request: ' + message.url, e);
             response.writeHead(500, 'Server error: ' + e.get);
         }
         finally {

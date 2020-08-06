@@ -4,12 +4,16 @@ import fs from 'fs';
 import { fileExists } from './Utils';
 import { AliasMap, newAliasResolver } from './AliasMap';
 
-export type ModuleResolver = (name: string) => string;
+export type ModuleResolver = (name: string) => string | null;
 
 export function defaultResolver(aliasMap?: AliasMap): ModuleResolver {
   const resolver = newAliasResolver(aliasMap);
   return name => {
-    name = (resolver && resolver(name)) || name;
+    if (resolver) {
+      const resolvedPath = resolver(name);
+      if (resolvedPath === null) return null;
+      if (resolvedPath) name = resolvedPath;
+    }
     const packageFile = path.join('node_modules', name, 'package.json');
     if (fileExists(packageFile)) {
       const npmPackage = JSON.parse(fs.readFileSync(packageFile, { encoding: 'utf-8' }));

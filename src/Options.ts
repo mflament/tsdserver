@@ -23,4 +23,6 @@ export interface Options {
   updateJSImport?: boolean | JSImportTransformerOptions;
 
   wrapJSResources?: boolean;
+
+  debug?: boolean;
 }

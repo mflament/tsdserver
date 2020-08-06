@@ -1,19 +1,18 @@
 import { types } from 'util';
 import { replaceMatches } from './Utils';
-import { type } from 'os';
 
 /**
  * An alias associating a value to a string or a regexp.
  */
 export interface Alias {
   /**
-   * A string or a regexp used to match the module name.
+   * A function, a string or a regexp used to match the module name.
    */
-  find: ((path: string) => boolean | string[] | undefined) | string | RegExp;
+  find: ((path: string) => boolean | string[] | null | undefined) | string | RegExp;
   /**
    * The replacement used for module path. Matched groups can be refenced using $1, $2, ...
    */
-  replace: ((...matches: string[]) => string) | string;
+  replace: ((...matches: string[]) => string) | string | null;
 }
 
 /**
@@ -26,10 +25,10 @@ function isAlias(obj: any): obj is Alias {
     const alias = obj as Alias;
 
     const findType = typeof alias.find;
-    const replaceType = typeof alias.replace;
+    const replaceType = alias.replace ? typeof alias.replace : null;
     return (
       (findType === 'string' || findType === 'function' || types.isRegExp(alias.find)) &&
-      (replaceType === 'string' || replaceType === 'function')
+      (replaceType === null || replaceType === 'string' || replaceType === 'function')
     );
   }
   return false;
@@ -39,15 +38,15 @@ function isAliasArray(obj: any): obj is Alias[] {
   return Array.isArray(obj) && obj.every(o => isAlias(o));
 }
 
-export function newAliasResolver(param?: AliasMap): (name: string) => string | undefined {
+export function newAliasResolver(param?: AliasMap): (name: string) => string | null | undefined {
   const aliases: Alias[] = [];
   if (isAliasArray(param)) {
     aliases.push(...param);
   } else if (param != null && typeof param === 'object') {
     for (const key in param) {
-      const alias = {
+      const alias: Alias = {
         find: key,
-        replacement: param[key]
+        replace: param[key]
       };
       if (isAlias(alias)) {
         aliases.push(alias);
@@ -65,6 +64,7 @@ export function newAliasResolver(param?: AliasMap): (name: string) => string | u
       if (types.isRegExp(alias.find)) {
         const matches = name.match(alias.find);
         if (matches) {
+          if (alias.replace == null) return null;
           if (typeof alias.replace === 'function') return alias.replace(...matches);
           return replaceMatches(alias.replace, matches);
         }
@@ -74,8 +74,12 @@ export function newAliasResolver(param?: AliasMap): (name: string) => string | u
       if (typeof alias.find === 'function') {
         let results = alias.find(name);
         if (results) {
+          if (results == null) return null;
+
           if (typeof results === 'string') results = [results];
           else if (results === true) results = [name];
+
+          if (alias.replace === null) return null;
           if (typeof alias.replace === 'function') return alias.replace(...results);
           return replaceMatches(alias.replace, results);
         }
