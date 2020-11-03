@@ -1,6 +1,6 @@
 {
   "name": "tsdserver",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "Yah",
   "license": "Apache-2.0",
   "description": "HTTP server used for TypeScript browser dev",
@@ -15,7 +15,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Yah-BL/tsdserver"
+    "url": "https://github.com/mflament/tsdserver"
   },
   "keywords": [
     "typescript",
