@@ -1,18 +1,8 @@
 import acorn from 'acorn';
 import walk from 'acorn-walk';
 import { defaultResolver, ModuleResolver } from './DefaultModuleResolver';
-import { AliasMap } from './AliasMap';
+import { JSImportTransformerOptions } from './Options';
 import { ResourceTransformer } from './ResourceTransformer';
-import { ResolvedFile } from './RequestHandler';
-
-export type SourceType = 'script' | 'module';
-export type EcmaVersion = 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 2015 | 2016 | 2017 | 2018 | 2019 | 2020;
-
-export interface JSImportTransformerOptions {
-  readonly sourceType?: SourceType;
-  readonly ecmaVersion?: EcmaVersion;
-  readonly moduleResolver?: ModuleResolver | AliasMap;
-}
 
 function isModuleResolver(obj: any): obj is ModuleResolver {
   return typeof obj === 'function';
@@ -94,7 +84,6 @@ const newTransformer = (options?: JSImportTransformerOptions | boolean): Resourc
             return;
           } else console.error('No range for node', node);
         } else {
-          //if (!resolved.startsWith('./')) resolved = './' + resolved;
           name = resolved;
         }
       }

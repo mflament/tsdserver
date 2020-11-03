@@ -12,7 +12,7 @@ var acorn = _interopDefault(require('acorn'));
 var walk = _interopDefault(require('acorn-walk'));
 var util = require('util');
 
-var version = "2.0.0";
+var version = "2.1.0";
 
 function fileExists(path) {
     const stats = fileStats(path);
@@ -190,7 +190,6 @@ const newTransformer = (options) => {
                         console.error('No range for node', node);
                 }
                 else {
-                    //if (!resolved.startsWith('./')) resolved = './' + resolved;
                     name = resolved;
                 }
             }
