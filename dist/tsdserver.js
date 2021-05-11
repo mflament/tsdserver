@@ -1,16 +1,25 @@
 'use strict';
 
-function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
-
-var arg = _interopDefault(require('arg'));
-var path = _interopDefault(require('path'));
-var serve = _interopDefault(require('micro'));
-var url = _interopDefault(require('url'));
-var fs = _interopDefault(require('fs'));
-var mime = _interopDefault(require('mime-types'));
-var acorn = _interopDefault(require('acorn'));
-var walk = _interopDefault(require('acorn-walk'));
+var arg = require('arg');
+var path = require('path');
+var serve = require('micro');
+var url = require('url');
+var fs = require('fs');
+var mime = require('mime-types');
+var acorn = require('acorn');
+var walk = require('acorn-walk');
 var util = require('util');
+
+function _interopDefaultLegacy (e) { return e && typeof e === 'object' && 'default' in e ? e : { 'default': e }; }
+
+var arg__default = /*#__PURE__*/_interopDefaultLegacy(arg);
+var path__default = /*#__PURE__*/_interopDefaultLegacy(path);
+var serve__default = /*#__PURE__*/_interopDefaultLegacy(serve);
+var url__default = /*#__PURE__*/_interopDefaultLegacy(url);
+var fs__default = /*#__PURE__*/_interopDefaultLegacy(fs);
+var mime__default = /*#__PURE__*/_interopDefaultLegacy(mime);
+var acorn__default = /*#__PURE__*/_interopDefaultLegacy(acorn);
+var walk__default = /*#__PURE__*/_interopDefaultLegacy(walk);
 
 var version = "2.1.0";
 
@@ -20,7 +29,7 @@ function fileExists(path) {
 }
 function fileStats(path) {
     try {
-        return fs.statSync(path, { bigint: false });
+        return fs__default['default'].statSync(path, { bigint: false });
     }
     catch (e) {
         if (e.code !== 'ENOENT')
@@ -114,13 +123,13 @@ function defaultResolver(aliasMap) {
             if (resolvedPath)
                 name = resolvedPath;
         }
-        const packageFile = path.join('node_modules', name, 'package.json');
+        const packageFile = path__default['default'].join('node_modules', name, 'package.json');
         if (fileExists(packageFile)) {
-            const npmPackage = JSON.parse(fs.readFileSync(packageFile, { encoding: 'utf-8' }));
+            const npmPackage = JSON.parse(fs__default['default'].readFileSync(packageFile, { encoding: 'utf-8' }));
             let file = npmPackage['module'] || npmPackage['main'];
             if (typeof file === 'string') {
-                if (fileExists(path.join('node_modules', name, file))) {
-                    return '/' + path.posix.join(name, file);
+                if (fileExists(path__default['default'].join('node_modules', name, file))) {
+                    return '/' + path__default['default'].posix.join(name, file);
                 }
             }
         }
@@ -160,7 +169,7 @@ const newTransformer = (options) => {
         moduleResolver = defaultResolver(options.moduleResolver);
     }
     const updateSource = (code) => {
-        const parsed = acorn.parse(code, {
+        const parsed = acorn__default['default'].parse(code, {
             sourceType: sourceType,
             ecmaVersion: ecmaVersion,
             ranges: true
@@ -201,7 +210,7 @@ const newTransformer = (options) => {
                 offset = source.range[1];
             }
         };
-        walk.simple(parsed, {
+        walk__default['default'].simple(parsed, {
             ImportDeclaration: visitor,
             ImportExpression: visitor,
             ExportNamedDeclaration: visitor,
@@ -253,17 +262,17 @@ class DefaultResolvedFile {
         this.content = null;
     }
     get requestedMimeType() {
-        return mime.lookup(path.extname(this.requestedPath)) || undefined;
+        return mime__default['default'].lookup(path__default['default'].extname(this.requestedPath)) || undefined;
     }
     get resolvedMimeType() {
-        return mime.lookup(path.extname(this.resolvedFile)) || undefined;
+        return mime__default['default'].lookup(path__default['default'].extname(this.resolvedFile)) || undefined;
     }
     async readText() {
         if (this.content !== null) {
             return Promise.resolve(this.content);
         }
         return new Promise((resolve, reject) => {
-            fs.readFile(this.resolvedFile, { encoding: 'utf-8' }, (err, data) => {
+            fs__default['default'].readFile(this.resolvedFile, { encoding: 'utf-8' }, (err, data) => {
                 if (err)
                     reject(err);
                 else {
@@ -317,7 +326,7 @@ class DefaultResolvedFile {
     }
     async stream(out) {
         return new Promise(resolve => {
-            const stream = fs.createReadStream(this.resolvedFile);
+            const stream = fs__default['default'].createReadStream(this.resolvedFile);
             function done() {
                 stream.close();
                 resolve();
@@ -377,7 +386,7 @@ class FileResolver {
         let currentPath = requestPath;
         while (currentPath) {
             for (const directory of this.directories) {
-                let file = path.resolve(directory, currentPath);
+                let file = path__default['default'].resolve(directory, currentPath);
                 const stats = fileStats(file);
                 if (stats != null) {
                     return new DefaultResolvedFile(requestPath, currentPath, file, stats);
@@ -388,7 +397,7 @@ class FileResolver {
     }
 }
 function extractPath(requestUrl) {
-    let requestPath = url.parse(requestUrl).pathname;
+    let requestPath = url__default['default'].parse(requestUrl).pathname;
     if (requestPath) {
         if (requestPath.startsWith('/'))
             requestPath = requestPath.substring(1);
@@ -540,8 +549,8 @@ function isAddressInfo(o) {
 }
 async function loadOptions(files) {
     for (let file of files) {
-        if (!path.isAbsolute(file))
-            file = path.resolve(file);
+        if (!path__default['default'].isAbsolute(file))
+            file = path__default['default'].resolve(file);
         if (fileExists(file)) {
             let obj;
             try {
@@ -559,7 +568,7 @@ async function loadOptions(files) {
 }
 async function parseCommandLine() {
     // Check if the user defined any options
-    const args = arg({
+    const args = arg__default['default']({
         '--listen': [parseEndpoint],
         '-l': '--listen',
         '--help': Boolean,
@@ -609,7 +618,7 @@ function registerShutdown(fn) {
     process.on('exit', wrapper);
 }
 function startEndpoint(module, endpoint) {
-    const server = serve(module);
+    const server = serve__default['default'](module);
     server.on('error', err => {
         console.error('tsdserver:', err.stack);
         process.exit(1);
