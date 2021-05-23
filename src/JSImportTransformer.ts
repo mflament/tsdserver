@@ -1,15 +1,112 @@
 import acorn from 'acorn';
 import walk from 'acorn-walk';
-import { defaultResolver, ModuleResolver } from './DefaultModuleResolver';
-import { JSImportTransformerOptions } from './Options';
-import { ResourceTransformer } from './ResourceTransformer';
+import { posix as path } from 'path';
+import { createImportResolver, ImportResolver } from './ImportResolver';
+import { CompilerOptions } from './Options';
+import { ResolvedFile } from './ResolvedFile';
+import { ResourceTransformer } from './ResourceTransfomer';
 
-function isModuleResolver(obj: any): obj is ModuleResolver {
-  return typeof obj === 'function';
+export class ImportDeclaration {
+  static create(importPath: string, declaringFile: ResolvedFile): ImportDeclaration | undefined {
+    const index = importPath.indexOf('/');
+    if (index < 0) {
+      return new ImportDeclaration(importPath, declaringFile);
+    }
+
+    const module = importPath.substring(0, index);
+    if (module === '' || module === '.' || module === '..') return undefined;
+    const file = importPath.substring(index + 1);
+    return new ImportDeclaration(module, declaringFile, file);
+  }
+
+  private constructor(
+    readonly moduleName: string, // module name
+    readonly declaringFile: ResolvedFile,
+    readonly filePath?: string // relative file path in module
+  ) {}
+
+  get path(): string {
+    let res = this.moduleName;
+    if (this.filePath) res += '/' + this.filePath;
+    return res;
+  }
 }
 
-function isRelativeModule(name: string) {
-  return name.startsWith('/') || name.startsWith('./') || name.startsWith('../');
+export function newJSImportTransformer(compilerOptions: CompilerOptions): ResourceTransformer {
+  const parserOptions: acorn.Options = {
+    sourceType: getSourceType(compilerOptions),
+    ecmaVersion: getEcmaVersion(compilerOptions),
+    ranges: true
+  };
+  const importResolver = createImportResolver(compilerOptions);
+  return file => transformJS(file, parserOptions, importResolver);
+}
+
+async function transformJS(
+  file: ResolvedFile,
+  parserOptions: acorn.Options,
+  importResolver: ImportResolver
+): Promise<string | undefined> {
+  if (file.resolvedFile.endsWith('.js')) {
+    const code = await file.readText();
+    let ast;
+    try {
+      ast = acorn.parse(code, parserOptions);
+      return transformAST(file, code, ast, importResolver);
+    } catch (e) {
+      console.error('Error transforming ' + file.resolvedFile, e);
+      return code;
+    }
+  }
+  return undefined;
+}
+
+function transformAST(file: ResolvedFile, code: string, ast: acorn.Node, moduleResolver: ImportResolver): string {
+  const output = { code: '', offset: 0 };
+  const visitor = (n: acorn.Node) => visitNode(n, file, code, moduleResolver, output);
+  walk.simple(ast, {
+    ImportDeclaration: visitor,
+    ImportExpression: visitor,
+    ExportNamedDeclaration: visitor,
+    ExportAllDeclaration: visitor
+  });
+  if (output.offset < code.length) {
+    output.code += code.substring(output.offset, code.length);
+  }
+  return output.code;
+}
+
+function visitNode(
+  node: acorn.Node,
+  file: ResolvedFile,
+  code: string,
+  resolveImport: ImportResolver,
+  output: { code: string; offset: number }
+): void {
+  if (!node.range) throw new Error('Missing range in node ' + node);
+  const source = getSource(node);
+  if (!source?.range || !source?.value) return;
+  const name = source.value;
+  const importDeclaration = ImportDeclaration.create(name, file);
+  let importPath;
+  if (importDeclaration) {
+    importPath = resolveImport(importDeclaration);
+  } else {
+    importPath = path.join(path.dirname(file.resolvedPath), name);
+  }
+  output.code += code.substring(output.offset, source.range[0]);
+  if (importPath) {
+    if (!importPath.startsWith('/')) importPath = '/' + importPath;
+    if (!importPath.endsWith('.js')) importPath += '.js';
+    output.code += '"' + importPath + '"';
+  } else {
+    output.code += '"' + name + '"';
+  }
+  output.offset = source.range[1];
+}
+
+function isModuleResolver(obj: any): obj is ImportResolver {
+  return typeof obj === 'function';
 }
 
 type StringLiteral = acorn.Node & {
@@ -18,111 +115,62 @@ type StringLiteral = acorn.Node & {
   range?: [number, number];
 };
 
-type ImportDeclaration = acorn.Node & {
+type ImportDeclarationNode = acorn.Node & {
   type: 'ImportDeclaration' | 'ImportExpression';
   source: StringLiteral;
 };
 
-type ExportDeclaration = acorn.Node & {
+type ExportDeclarationNode = acorn.Node & {
   type: 'ExportNamedDeclaration' | 'ExportAllDeclaration';
   source: StringLiteral | null;
 };
 
-function isImportDeclaration(node: acorn.Node): node is ImportDeclaration {
+function isImportDeclaration(node: acorn.Node): node is ImportDeclarationNode {
   return node.type === 'ImportDeclaration' || node.type === 'ImportExpression';
 }
 
-function isExportDeclaration(node: acorn.Node): node is ExportDeclaration {
+function isExportDeclaration(node: acorn.Node): node is ExportDeclarationNode {
   return node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration';
 }
 
 function getSource(node: acorn.Node): StringLiteral | null {
-  if (isImportDeclaration(node)) return node.source;
-  if (isExportDeclaration(node)) return node.source;
+  if (isImportDeclaration(node) || isExportDeclaration(node)) return node.source;
   return null;
 }
 
-const newTransformer = (options?: JSImportTransformerOptions | boolean): ResourceTransformer => {
-  if (options === undefined || typeof options === 'boolean') options = {};
-  const sourceType = options.sourceType || 'module';
-  const ecmaVersion = options.ecmaVersion || 2020;
+type SourceType = 'script' | 'module';
+type EcmaVersion = 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 2015 | 2016 | 2017 | 2018 | 2019 | 2020;
 
-  let moduleResolver: ModuleResolver;
-  if (isModuleResolver(options.moduleResolver)) {
-    moduleResolver = options.moduleResolver;
-  } else {
-    moduleResolver = defaultResolver(options.moduleResolver);
+function getSourceType(compilerOptions: CompilerOptions): SourceType {
+  switch (compilerOptions.module) {
+    case 'ESNext':
+    case 'ES2020':
+      return 'module';
+    default:
+      return 'script';
   }
+}
 
-  const updateSource = (code: string): string => {
-    const parsed = acorn.parse(code, {
-      sourceType: sourceType,
-      ecmaVersion: ecmaVersion,
-      ranges: true
-    });
-
-    let newCode = '';
-    let offset = 0;
-
-    const visitor = (node: acorn.Node): void => {
-      const source = getSource(node);
-      if (!source) return;
-      if (!source.range) {
-        console.error('No; range in AST node');
-        return;
-      }
-
-      let name = source.value;
-      if (!name) return;
-
-      if (!isRelativeModule(name)) {
-        let resolved = moduleResolver(name);
-        if (resolved === null) {
-          if (node.range) {
-            newCode += code.substring(offset, node.range[0]);
-            offset = node.range[1];
-            return;
-          } else console.error('No range for node', node);
-        } else {
-          name = resolved;
-        }
-      }
-
-      if (!name.endsWith('.js')) name += '.js';
-
-      if (name !== source.value) {
-        newCode += code.substring(offset, source.range[0]);
-        newCode += '"' + name + '"';
-        offset = source.range[1];
-      }
-    };
-
-    walk.simple(parsed, {
-      ImportDeclaration: visitor,
-      ImportExpression: visitor,
-      ExportNamedDeclaration: visitor,
-      ExportAllDeclaration: visitor
-    });
-
-    if (offset < code.length) {
-      newCode += code.substring(offset, code.length);
-    }
-
-    return newCode;
-  };
-
-  return async file => {
-    if (file.resolvedFile.endsWith('.js')) {
-      const code = await file.readText();
-      try {
-        return updateSource(code);
-      } catch (e) {
-        console.error('Error parsing ' + file.resolvedFile, e);
-        return code;
-      }
-    }
-    return undefined;
-  };
-};
-
-export default newTransformer;
+function getEcmaVersion(compilerOptions: CompilerOptions): EcmaVersion {
+  switch (compilerOptions.target) {
+    case 'ES3':
+      return 3;
+    case 'ES5':
+      return 5;
+    case 'ES2015':
+      return 2015;
+    case 'ES2016':
+      return 2016;
+    case 'ES2017':
+      return 2017;
+    case 'ES2018':
+      return 2018;
+    case 'ES2019':
+      return 2019;
+    case 'ES2020':
+    case 'ESNext':
+    case 'Latest':
+    default:
+      return 2020;
+  }
+}

@@ -1,3 +1,4 @@
 #!/usr/bin/env node
 
-require('./dist/tsdserver').start();
+const server = require('./dist/tsdserver')
+server.start();

@@ -7,12 +7,12 @@ import { version } from '../package.json';
 
 import { Server } from 'http';
 import { AddressInfo } from 'net';
-import { createRequestListener } from './RequestHandler';
-import { isObject, isArray, isNumber, isFunction, isString, isBoolean } from 'util';
+import { createRequestListener } from './RequestListener';
 
 import { fileExists } from './Utils';
 
 import { Options } from './Options';
+import { readFile } from 'fs';
 
 const HELP_MESSAGE = `
 tsdserver - Asynchronous HTTP resources for typescript web testing.
@@ -85,25 +85,33 @@ function isAddressInfo(o: any): o is AddressInfo {
   return typeof o === 'object' && (o as AddressInfo).port !== undefined;
 }
 
-async function loadOptions(files: string[]): Promise<Options | undefined> {
-  for (let file of files) {
-    if (!path.isAbsolute(file)) file = path.resolve(file);
-    if (fileExists(file)) {
-      let obj;
-      try {
-        obj = await require(file);
-      } catch (e) {
-        console.error('Error loading options file ' + file, e);
-      }
-      if (obj !== null && typeof obj === 'object') {
-        console.info('Using options file ' + file);
-        return obj;
-      }
-    }
-  }
+function defaultOptions() {
+  return { welcome: 'index.html', directories: ['.'], tsconfig: './tsconfig.json', debug: false };
 }
 
-async function parseCommandLine(): Promise<{ endpoints: EndPoint[]; options?: Options }> {
+async function loadOptions(file?: string): Promise<Options> {
+  if (!file) {
+    file = './tsdserver.config.js';
+    if (!fileExists(file)) {
+      file = './tsdserver.json';
+      if (!fileExists(file)) file = undefined;
+    }
+  }
+  if (!file) return defaultOptions();
+  if (!path.isAbsolute(file)) file = path.resolve(file);
+  if (file?.endsWith('.js')) return { ...defaultOptions(), ...(await require(file)) };
+  else if (file?.endsWith('.json')) {
+    const jsonFile = file;
+    return new Promise((resolve, reject) => {
+      readFile(jsonFile, { encoding: 'utf8' }, (error, data) => {
+        if (error) reject(error);
+        else resolve({ ...defaultOptions(), ...JSON.parse(data) });
+      });
+    });
+  } else return defaultOptions();
+}
+
+async function parseCommandLine(): Promise<{ endpoints: EndPoint[]; options: Options }> {
   // Check if the user defined any options
   const args = arg({
     '--listen': [parseEndpoint],
@@ -137,10 +145,7 @@ async function parseCommandLine(): Promise<{ endpoints: EndPoint[]; options?: Op
     endpoints = args['--listen'];
   }
 
-  const optionsFiles = [];
-  if (args._[0]) optionsFiles.push(args._[0]);
-  optionsFiles.push('tsdserver.config.js', 'tsdserver.json');
-  let options = await loadOptions(optionsFiles);
+  let options = await loadOptions(args._[0]);
   return {
     endpoints: endpoints,
     options: options
@@ -162,8 +167,8 @@ function registerShutdown(fn: () => void): void {
   process.on('exit', wrapper);
 }
 
-function startEndpoint(module: RequestHandler, endpoint: EndPoint): void {
-  const server = serve(module);
+function startEndpoint(requestHandler: RequestHandler, endpoint: EndPoint): void {
+  const server = serve(requestHandler);
   server.on('error', err => {
     console.error('tsdserver:', err.stack);
     process.exit(1);
@@ -184,7 +189,7 @@ function startEndpoint(module: RequestHandler, endpoint: EndPoint): void {
   });
 }
 
-async function start(): Promise<void> {
+export async function start(): Promise<void> {
   try {
     const commandLine = await parseCommandLine();
     const listener = createRequestListener(commandLine.options);
@@ -196,5 +201,3 @@ async function start(): Promise<void> {
     console.error(e);
   }
 }
-
-export default { start: start };

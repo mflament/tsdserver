@@ -1,6 +1,6 @@
-import { ResourceTransformer } from './ResourceTransformer';
+import { ResourceTransformer } from './ResourceTransfomer';
 
-export default (): ResourceTransformer => {
+export function newResourceWrapper(): ResourceTransformer {
   return async file => {
     if (file.requestedPath.endsWith('.js') && !file.resolvedFile.endsWith('.js')) {
       const code = await file.readText();
@@ -8,4 +8,4 @@ export default (): ResourceTransformer => {
     }
     return undefined;
   };
-};
+}
