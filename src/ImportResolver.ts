@@ -11,10 +11,10 @@ export function createImportResolver(options: CompilerOptions): ImportResolver {
 }
 
 function resolvePath(decl: ImportDeclaration, compilerOptions: CompilerOptions): string | undefined {
-  let resolvedPath = resolveCompilerPaths(decl, compilerOptions);
-  if (!resolvedPath) resolvedPath = resolveNodeFile(decl);
-  if (!resolvedPath) resolvedPath = resolveNodePackage(decl);
-  return resolvedPath;
+  const res = resolveCompilerPaths(decl, compilerOptions)
+  if (res)
+    return res;
+  return resolveNodeDependency(decl);
 }
 
 function resolveCompilerPaths(decl: ImportDeclaration, compilerOptions: CompilerOptions): string | undefined {
@@ -34,24 +34,40 @@ function resolveCompilerPaths(decl: ImportDeclaration, compilerOptions: Compiler
   return undefined;
 }
 
-function resolveNodeFile(decl: ImportDeclaration): string | undefined {
-  const sourceFile = path.join('node_modules', decl.path + '.js');
-  if (fileExists(sourceFile))
-    return '/' + sourceFile;
-  return undefined;
-}
+function resolveNodeDependency(decl: ImportDeclaration): string | undefined {
+  const pj = loadPackage('package.json');
 
-function resolveNodePackage(decl: ImportDeclaration): string | undefined {
-  const moduleName = decl.moduleName;
-  const packageFile = path.join('node_modules', moduleName, 'package.json');
+  let modulePath = 'node_modules/' + decl.moduleName;
+  const dep = pj.dependencies ? pj.dependencies[decl.moduleName] : undefined;
+  if (dep && dep.startsWith('file:/')) {
+    modulePath = dep.substring('file:/'.length);
+  }
+
+  if (decl.filePath) {
+    const file = path.join(modulePath, decl.filePath + '.js');
+    if (fileExists(file))
+      return '/' + file;
+  }
+
+  const packageFile = path.join(modulePath, 'package.json');
   if (fileExists(packageFile)) {
-    const npmPackage = JSON.parse(readFileSync(packageFile, {encoding: 'utf-8'}));
-    let file = npmPackage['module'] || npmPackage['main'];
+    const npmPackage = loadPackage(packageFile);
+    let file = npmPackage.module || npmPackage.main;
     if (typeof file === 'string') {
-      const projectPath = path.join('node_modules', moduleName, file);
+      const projectPath = path.join(modulePath, file);
       if (fileExists(projectPath))
         return '/' + projectPath;
     }
   }
   return undefined;
+}
+
+function loadPackage(packageFile: string): PackageJson {
+  return JSON.parse(readFileSync(packageFile, {encoding: 'utf-8'})) as PackageJson;
+}
+
+interface PackageJson {
+  module?: string;
+  main?: string;
+  dependencies?: { [name: string]: string };
 }
