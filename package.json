@@ -1,6 +1,6 @@
 {
   "name": "tsdserver",
-  "version": "3.0.2",
+  "version": "3.0.4",
   "author": "Yah",
   "license": "Apache-2.0",
   "description": "HTTP server used for TypeScript browser dev",

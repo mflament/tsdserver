@@ -35,26 +35,20 @@ function resolveCompilerPaths(decl: ImportDeclaration, compilerOptions: Compiler
 }
 
 function resolveNodeDependency(decl: ImportDeclaration): string | undefined {
-  const pj = loadPackage('package.json');
-
   let modulePath = 'node_modules/' + decl.moduleName;
-  const dep = pj.dependencies ? pj.dependencies[decl.moduleName] : undefined;
-  if (dep && dep.startsWith('file:/')) {
-    modulePath = dep.substring('file:/'.length);
-  }
-
   if (decl.filePath) {
     const file = path.join(modulePath, decl.filePath + '.js');
     if (fileExists(file))
       return '/' + file;
   }
 
-  const packageFile = path.join(modulePath, 'package.json');
+  let packageFile = path.join(modulePath, 'package.json');
+  if (!fileExists(packageFile) && decl.filePath) packageFile = path.join(modulePath, decl.filePath, 'package.json');
   if (fileExists(packageFile)) {
     const npmPackage = loadPackage(packageFile);
     let file = npmPackage.module || npmPackage.main;
     if (typeof file === 'string') {
-      const projectPath = path.join(modulePath, file);
+      const projectPath = path.join(path.dirname(packageFile), file);
       if (fileExists(projectPath))
         return '/' + projectPath;
     }

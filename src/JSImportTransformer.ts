@@ -1,10 +1,10 @@
 import acorn from 'acorn';
 import walk from 'acorn-walk';
-import { posix as path } from 'path';
-import { createImportResolver, ImportResolver } from './ImportResolver';
-import { CompilerOptions } from './Options';
-import { ResolvedFile } from './ResolvedFile';
-import { ResourceTransformer } from './ResourceTransfomer';
+import {posix as path} from 'path';
+import {createImportResolver, ImportResolver} from './ImportResolver';
+import {CompilerOptions} from './Options';
+import {ResolvedFile} from './ResolvedFile';
+import {ResourceTransformer} from './ResourceTransfomer';
 
 export class ImportDeclaration {
   static create(importPath: string, declaringFile: ResolvedFile): ImportDeclaration | undefined {
@@ -23,7 +23,8 @@ export class ImportDeclaration {
     readonly moduleName: string, // module name
     readonly declaringFile: ResolvedFile,
     readonly filePath?: string // relative file path in module
-  ) {}
+  ) {
+  }
 
   get path(): string {
     let res = this.moduleName;
@@ -34,9 +35,10 @@ export class ImportDeclaration {
 
 export function newJSImportTransformer(compilerOptions: CompilerOptions): ResourceTransformer {
   const parserOptions: acorn.Options = {
+    allowImportExportEverywhere: true,
     sourceType: getSourceType(compilerOptions),
     ecmaVersion: getEcmaVersion(compilerOptions),
-    ranges: true
+    ranges: true,
   };
   const importResolver = createImportResolver(compilerOptions);
   return file => transformJS(file, parserOptions, importResolver);
@@ -62,7 +64,7 @@ async function transformJS(
 }
 
 function transformAST(file: ResolvedFile, code: string, ast: acorn.Node, moduleResolver: ImportResolver): string {
-  const output = { code: '', offset: 0 };
+  const output = {code: '', offset: 0};
   const visitor = (n: acorn.Node) => visitNode(n, file, code, moduleResolver, output);
   walk.simple(ast, {
     ImportDeclaration: visitor,

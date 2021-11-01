@@ -1,10 +1,10 @@
-import { IncomingMessage, ServerResponse, OutgoingHttpHeaders, RequestListener } from 'http';
+import {IncomingMessage, RequestListener, ServerResponse} from 'http';
 import url from 'url';
-import { newJSImportTransformer } from './JSImportTransformer';
-import { CompilerOptions, Options } from './Options';
-import { ResolvedFile } from './ResolvedFile';
-import { ResourceTransformer } from './ResourceTransfomer';
-import { readFileSync } from 'fs';
+import {newJSImportTransformer} from './JSImportTransformer';
+import {CompilerOptions, Options} from './Options';
+import {ResolvedFile} from './ResolvedFile';
+import {ResourceTransformer} from './ResourceTransfomer';
+import {readFileSync} from 'fs';
 
 export function createRequestListener(options: Options): RequestListener {
   const compilerOptions: CompilerOptions = {
